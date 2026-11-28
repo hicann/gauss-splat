@@ -4,23 +4,23 @@
 
 ## 环境与安装
 
-在目标机器上安装与硬件匹配的 NPU 驱动、CANN toolkit，以及彼此兼容的 PyTorch 和 torch_npu（版本以目标机器的 CANN 发布配套关系为准）。先加载 CANN 环境变量，再从仓库根目录按架构编译扩展：
+先按[根目录 README](../README.md)完成虚拟环境、Ascend 框架和 gauss-splat 的编译安装。**推荐 CANN 9.2.0 及以上**；本文使用 CANN 9.2.0 / TorchNPU 产品版 26.2.0 / Python 3.12，具体包版本统一记录在 [constraints-cann92.txt](../constraints-cann92.txt)：`torch 2.12.0+cpu`、`torch_npu 2.12.0.post3`、`torchvision 0.27.0+cpu`。
+
+执行顺序为“安装框架和构建依赖 → 编译并安装 gauss-splat → 安装样例依赖 → 运行样例”。完成前两步后，从仓库根目录安装样例依赖：
 
 ```bash
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-
-# Ascend910B / Atlas A2/A3
-bash build.sh --python=3.12
-
-# Ascend950 / Atlas A5
-bash build.sh --python=3.12 --a5
-
-pip install dist/*.whl --force-reinstall
+python -m pip install --no-deps --index-url https://download.pytorch.org/whl/cpu -c constraints-cann92.txt torchvision
+python -m pip install -r examples/requirements.txt
+python -m pip check
+python -c "import torch, torch_npu, torchvision; from torchvision.ops import nms; print(torch.__version__, torch_npu.__version__, torchvision.__version__); print(nms(torch.tensor([[0., 0., 1., 1.]]), torch.tensor([1.]), 0.5))"
 cd examples
-pip install -r requirements.txt
 ```
 
-`--python` 应与当前环境的 Python 次版本一致。不要从旧版 `cann-recipes-spatial-intelligence/ops/ascendc` 编译本仓库算子；本仓库的 A5 实现由根目录 `build.sh --a5` 选择。
+第一条命令只从 CPU 源安装 torchvision。`examples/requirements.txt` 包含 `../requirements-build.txt`，复用构建依赖及版本约束，文件中仅补充样例所需的包；已满足要求的依赖会直接复用。在 `examples/` 目录内也可执行 `python -m pip install -r requirements.txt`，但它不代替 gauss-splat 的编译装包。出现 `operator torchvision::nms does not exist` 时，为第一条安装命令增加 `--force-reinstall` 后重新自检。
+
+默认构建不额外注入主机 C++ 头文件路径；旧环境的可选兼容处理见根目录安装说明。
+
+数据解析使用官方 `pycolmap>=3.12.6,<5` 的 `Reconstruction` API；原 rmbrualla fork 的 `SceneManager` 不再作为依赖。COLMAP 命令行版本与 Python 包版本不同，详见根目录 README。
 
 ## 数据与运行
 

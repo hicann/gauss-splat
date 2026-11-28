@@ -88,5 +88,4 @@ set(ASCEND_AUTOGEN_PATH ${CMAKE_BINARY_DIR}/autogen)
 set(ASCEND_FRAMEWORK_TYPE tensorflow)
 file(MAKE_DIRECTORY ${ASCEND_AUTOGEN_PATH})
 set(CUSTOM_COMPILE_OPTIONS "custom_compile_options.ini")
-execute_process(COMMAND rm -rf ${ASCEND_AUTOGEN_PATH}/${CUSTOM_COMPILE_OPTIONS}
-                COMMAND touch ${ASCEND_AUTOGEN_PATH}/${CUSTOM_COMPILE_OPTIONS})
+# kernels/CMakeLists.txt resets this file after selecting the architecture.

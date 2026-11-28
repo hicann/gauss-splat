@@ -1,13 +1,15 @@
-# assume torch is already installed
+# Build and install gauss-splat first, then install CPU torchvision; see README.md.
+# Then: python -m pip install -r examples/requirements.txt (from the repository root).
+# Keep the CPU index scoped to the separate torchvision installation command.
+-r ../requirements-build.txt
 
-# pycolmap for data parsing (rmbrualla fork: pure-Python SceneManager parser,
-# works on Python >= 3.12 via source install; requires numpy<2.0.0
-git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e
+# Additional example dependencies; common packages and constraints come from above.
+torchvision
+
+# Official COLMAP bindings; Reconstruction supports modern sparse models.
+pycolmap>=3.12.6,<5
 
 imageio[ffmpeg]
-# numpy 1.26.0 is the first release supporting Python 3.12;
-# keep <2.0.0 for compatibility with the rmbrualla pycolmap parser.
-numpy>=1.26.0,<2.0.0
 scikit-learn
 tqdm
 torchmetrics[image]
@@ -16,9 +18,5 @@ tyro>=0.8.8
 Pillow
 tensorboard
 tensorly
-pyyaml
 matplotlib
 fsspec==2024.10.0
-# torchvision 0.27.0 is built against torch 2.12.0, keep the versions in sync
-# (compatibility matrix: https://github.com/pytorch/vision#installation)
-torchvision==0.27.0

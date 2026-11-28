@@ -18,54 +18,68 @@ The source code of this project is released along with CANN software versions. F
 
 ### System Configuration (Recommended)
 
-| Item      | Requirement                                              |
-| :-------- | :------------------------------------------------ |
-| Hardware      | Atlas A2 training/inference series products/Atlas A3 training/inference series products/Ascend 950PR/Ascend 950DT |
-| CANN version  | 9.1.0 or later                                       |
-| Python    | >=3.12                                          |
-| PyTorch   | Compatible with CANN version, >=2.12.0                              |
-| torch_npu | Compatible with torch version, >=2.12.0                            |
+| Component | Combination used by the commands below |
+| :--- | :--- |
+| Hardware | Atlas A2/A3, Ascend 950PR/950DT |
+| CANN | **9.2.0 or later recommended; this combination uses 9.2.0** |
+| TorchNPU product release | **26.2.0** |
+| Python | **3.12** |
+| torch | **2.12.0+cpu** |
+| torch_npu package | **2.12.0.post3** |
+| torchvision (training examples) | **0.27.0+cpu** |
 
-> **Note**: The versions of Python, PyTorch, and torch_npu are strongly correlated. For detailed version dependencies, refer to the official website.
+`26.2.0` is the Ascend TorchNPU product release, not the pip version of `torch` or `torch_npu`. The `torch 2.12.0 / torch_npu 2.12.0.post3 / CANN 9.2.0` mapping is listed in the [official compatibility table](https://www.hiascend.com/developer/download/compatibility). Package constraints are centralized in [constraints-cann92.txt](constraints-cann92.txt). For another CANN/framework combination, update the matching versions together using the official table.
 
 CANN Environment Preparation
 
 > **Note**: When only compiling this project without running it (compile-time state), you only need to install the CANN toolkit package. When running this project (run-time state), you need to install the NPU driver, CANN toolkit package, and CANN ops package.
 
 1. **Install the NPU driver (run-time dependency)**: Run `npu-smi info` to check whether NPU information is displayed. If there is no NPU information or the chip model cannot be clearly identified, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) to install the driver.
-2. **Install CANN software packages**: The execution of this sample depends on the CANN toolkit (cann-toolkit) and CANN binary operator package (cann-kernels). The CANN software version used is CANN 9.1.0. Refer to [CANN Quick Installation](https://www.hiascend.com/cann/download), select the **stable version**, and download the corresponding packages based on the product series, CPU architecture, and OS (`Ascend-cann-toolkit_${version}_linux-${arch}.run` and `Ascend-cann-${chip_type}-ops_${version}_linux-${arch}.run`). Then follow the commands provided on the page to complete the installation.
+2. **Install CANN software packages**: The execution of this sample depends on the CANN toolkit (cann-toolkit) and CANN binary operator package (cann-kernels). **CANN 9.2.0 or later is recommended**, with toolkit and ops packages matching the selected release and hardware. Refer to [CANN Quick Installation](https://www.hiascend.com/cann/download), select the **stable version**, and download the corresponding packages based on the product series, CPU architecture, and OS (`Ascend-cann-toolkit_${version}_linux-${arch}.run` and `Ascend-cann-${chip_type}-ops_${version}_linux-${arch}.run`). Then follow the commands provided on the page to complete the installation.
 
    > **Note**: The `npu-smi info` output may not directly indicate the 910C chip model. The 910C chip belongs to the Atlas A3 training/inference series products, and its corresponding SoC code in the CANN ops package is `a3`, that is, `Ascend-cann-a3-ops_${version}_linux-${arch}.run`.
-3. The torch and torch_npu versions required by this sample are **2.12.0 or later**. Download and install the matching torch and torch_npu packages from the [Ascend Extension for PyTorch plugin](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download?versionId=186&ids=bcc87fc38cd74df28cf5c415cf2aea75%2C213%2C6%2C177%2C200%2C1%2C).
+3. **Download the framework wheels**: On the [Ascend Extension for PyTorch download page](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download), select **TorchNPU product release 26.2.0**, **PyTorch 2.12.0**, **Python 3.12**, and the target CPU architecture. Prepare the `torch 2.12.0+cpu` and `torch_npu 2.12.0.post3` wheels, then install them inside the environment created below.
 
 ## Installation
 
+Follow this order: create the environment, install the matching framework and build dependencies, compile and install gauss-splat, install example dependencies, then run the examples. Replace `/path/to/` with the framework wheel download directory and adjust the CANN environment script to your installation path.
+
 ```bash
-# Compile and install
-conda create -n 3dgs python=3.12
+conda create -n 3dgs python=3.12 -y
 conda activate 3dgs
 
 git clone -b ${tag_version} https://gitcode.com/cann/gauss-splat.git
 cd gauss-splat
-source ${CANN_INSTALL_PATH}/ascend-toolkit/set_env.sh
+source /usr/local/Ascend/cann/set_env.sh  # Adjust to your installation path
 
-pip install "numpy>=1.26.0,<2.0.0" decorator sympy scipy attrs cloudpickle psutil synr==0.5.0 tornado cmake pyyaml expecttest protobuf pytest
+python -m pip install -c constraints-cann92.txt /path/to/torch-2.12.0+cpu-*.whl /path/to/torch_npu-2.12.0.post3-*.whl
+python -m pip install -r requirements-build.txt
 
-# Method 1:
+# Check framework versions and NPU availability (True on a runtime host with a device)
+python -c "import torch, torch_npu; print(torch.__version__, torch_npu.__version__); print(torch.npu.is_available())"
+
+# Atlas A2/A3; for A5 replace this line with: bash build.sh --python=3.12 --a5
 bash build.sh --python=3.12
-# The `--python` parameter specifies the Python version used for compilation, supporting version 3.12 and later.
-
-# After successful compilation, `build` and `dist` folders are generated in the current directory, and the generated whl package is in the `dist` directory.
-pip install dist/*.whl --force-reinstall
-
-# Method 2:
-pip install . --no-build-isolation
+python -m pip install --no-deps --force-reinstall dist/*.whl
 ```
 
-> **numpy/pycolmap version notes**: The versions of numpy and pycolmap are strongly correlated with the Python version.
-> - **numpy>=1.26.0,<2.0.0**: numpy 1.26.0 is the first version to support Python 3.12; the upper bound of <2.0.0 is set to stay compatible with the 3DGS ecosystem and the rmbrualla fork of pycolmap (which relies on numpy structured dtype parsing and has not been adapted to the legacy APIs removed in numpy 2.x).
-> - **pycolmap**: Training data parsing uses the rmbrualla fork from `examples/requirements.txt` (a pure-Python implementation, `from pycolmap import SceneManager`), which can be installed directly from source on Python 3.12 without API compatibility issues; keep it paired with numpy<2.0.0.
-> - For detailed version dependencies, refer to the official website.
+If pip reports `Defaulting to user installation`, verify `python -m pip --version` points into the activated writable environment. Fix the environment before continuing; mixing user-site and environment packages can load a different torch/torchvision build.
+
+`--python` must match the active environment. Alternatively, replace the last two commands with `python -m pip install . --no-build-isolation` to install for the default architecture. Additional training/evaluation dependencies are listed in Testing below and the [training example](examples/README.md).
+
+<details>
+<summary>Missing C++ standard library headers during compilation</summary>
+
+If compilation reports `cstdint`, `cfloat`, or `type_traits file not found`, first install the C++ development headers matching your compiler, then enable this project's compatibility option (disabled by default):
+
+```bash
+export ASCENDC_ENABLE_HOST_HEADERS=ON
+bash build.sh --python=3.12
+```
+
+</details>
+
+> **Data parsing dependencies**: Training examples require `pycolmap>=3.12.6,<5` and `numpy>=1.26.0`. If no pycolmap wheel matches your Python version and CPU architecture, follow the [source installation instructions](https://github.com/colmap/colmap/tree/main/python).
 
 For Atlas A5, build in a matching A5 CANN environment with `bash build.sh --python=3.12 --a5`. See the [training example](examples/README.md).
 
@@ -82,10 +96,13 @@ Do not run the script directly from the project root. Otherwise, Python imports 
 
 ### Complete Rendering Pipeline (Using Rasterizer)
 
-> Tip: prepare Gaussian parameters in channel-first layout first (see `is_channel_first=True` below) to avoid the in-operator layout conversion and get better performance.
+The example uses `rasterization(...)` with camera-to-world matrices. Gaussian attributes are contiguous float32 NPU tensors: `means/scales [3,N]`, `quats [4,N]`, `opacities [N]`, and a single `sh [16,3,N]` tensor for degree 3.
+
+This layout requires `splats["is_channel_first"] = True`, as shown below, and avoids internal layout conversion. If omitted, the interface defaults to N-first inputs: attributes `[N,D]` and SH coefficients `[N,K,3]`.
 
 ```python
 import torch
+import torch_npu
 import gauss_splat
 
 # 1. Initialize the rasterizer
@@ -213,15 +230,23 @@ gauss-splat/
 
 ## Testing
 
-Before running the tests, complete the compilation and installation as described in the Installation section above, and load the CANN environment (`source ${CANN_INSTALL_PATH}/ascend-toolkit/set_env.sh`).
-
-To run the training/data samples under `examples/` (or cases that reuse their code), install the sample dependencies first:
+Install the framework and library as described above, and load `set_env.sh` for your CANN installation. For training/data examples, run these two installation commands from the repository root:
 
 ```bash
-pip install -r examples/requirements.txt
+# Use the CPU index only for torchvision; --no-deps preserves the installed Ascend framework
+python -m pip install --no-deps --index-url https://download.pytorch.org/whl/cpu -c constraints-cann92.txt torchvision
+python -m pip install -r examples/requirements.txt
+
+# Check dependency metadata and the torchvision binary operator
+python -m pip check
+python -c "import torch, torch_npu, torchvision; from torchvision.ops import nms; print(torch.__version__, torch_npu.__version__, torchvision.__version__); print(nms(torch.tensor([[0., 0., 1., 1.]]), torch.tensor([1.]), 0.5))"
 ```
 
-`examples/requirements.txt` declares `imageio[ffmpeg]`, `opencv-python-headless` (provides `cv2`), `tqdm`, and other dependencies. `examples/gsplat` is the gsplat subset vendored in this repository; run from the `examples/` directory and no separate pip package with the same name is required.
+`examples/requirements.txt` includes `../requirements-build.txt` via `-r`, reusing its build dependencies and version constraints, and lists only additional example packages. Common dependencies are maintained once; pip reuses installed packages that satisfy the requirements. Installing requirements does not compile gauss-splat, so complete the build and package installation above first.
+
+Constraints cover Python packages, not CANN/driver versions or wheel provenance, so install the framework as instructed above first. The CPU torchvision build is not interchangeable with the original plain PyPI build. For `operator torchvision::nms does not exist`, add `--force-reinstall` to the first command and rerun the checks.
+
+`examples/requirements.txt` includes data, image, and evaluation dependencies. `examples/gsplat` is vendored in the repository; no separate package with that name is needed. Use `python -m pip` inside an activated, writable environment so installation and execution use the same interpreter.
 
 ### Python Tests
 

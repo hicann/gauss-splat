@@ -1,0 +1,10 @@
+# Example environment: CANN 9.2.0 / TorchNPU product release 26.2.0 / Python 3.12.
+# Product release 26.2.0 is NOT the pip package version of torch_npu.
+# https://github.com/Ascend/pytorch/blob/master/COMPATIBILITY.md
+# Install matching Ascend framework wheels before installing requirements.
+torch==2.12.0+cpu
+torch-npu==2.12.0.post3
+torchvision==0.27.0+cpu
+
+# NumPy 1.26 supports Python 3.12; the official pycolmap parser also permits 2.x.
+numpy>=1.26.0

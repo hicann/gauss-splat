@@ -114,7 +114,7 @@ endfunction()
 
 function(add_ops_compile_options OP_TYPE)
   cmake_parse_arguments(OP_COMPILE "" "OP_TYPE" "COMPUTE_UNIT;OPTIONS" ${ARGN})
-  file(APPEND ${ASCEND_AUTOGEN_PATH}/${CUSTOM_COMPILE_OPTIONS}
+  file(APPEND "${ASCEND_AUTOGEN_PATH}/${CUSTOM_COMPILE_OPTIONS}"
        "${OP_TYPE},${OP_COMPILE_COMPUTE_UNIT},${OP_COMPILE_OPTIONS}\n")
 endfunction()
 

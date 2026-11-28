@@ -18,53 +18,68 @@ gauss-splat是基于[CANN](https://hiascend.com/software/cann)的3D Gaussian Spl
 
 ### 系统配置(推荐)
 
-| 项目      | 要求                                              |
-| :-------- | :------------------------------------------------ |
-| 硬件      | Atlas A2训练推理系列产品/Atlas A3训练推理系列产品/Ascend 950PR/Ascend 950DT |
-| CANN版本  | 9.1.0及以上                                       |
-| Python    | >=3.12                                          |
-| PyTorch   | 配套CANN版本，>=2.12.0                              |
-| torch_npu | 配套torch版本，>=2.12.0                            |
+| 项目 | 本文安装命令使用的组合 |
+| :--- | :--- |
+| 硬件 | Atlas A2/A3、Ascend 950PR/950DT |
+| CANN | **推荐 9.2.0 及以上；以下组合使用 9.2.0** |
+| TorchNPU 产品发布版本 | **26.2.0** |
+| Python | **3.12** |
+| torch | **2.12.0+cpu** |
+| torch_npu 安装包 | **2.12.0.post3** |
+| torchvision（训练样例） | **0.27.0+cpu** |
 
-> **说明**: Python/PyTorch/torch_npu 三者版本强关联，详细版本依赖关系请参考官网确认。
+`26.2.0` 是昇腾 TorchNPU 的产品发布版本，不是 `torch` 或 `torch_npu` 的 pip 包版本。上述 `torch 2.12.0 / torch_npu 2.12.0.post3 / CANN 9.2.0` 配套关系见[官方版本表](https://www.hiascend.com/developer/download/compatibility)。版本约束集中在 [constraints-cann92.txt](constraints-cann92.txt)；选择其他 CANN/框架组合时，应按官方配套表一起调整，不能只升级其中一个包。
 
 CANN环境准备
 
 > **说明**：仅编译本项目不运行（编译态）时，只需安装CANN toolkit包；运行本项目（运行态）时，需安装NPU驱动、CANN toolkit包与CANN ops包。
 
 1. **安装NPU驱动（运行态依赖）**：使用`npu-smi info`检查是否有NPU相关信息，若没有或无法明确识别芯片型号，请参考《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动安装。
-2. **安装CANN软件包**：本样例的执行依赖CANN开发套件包（cann-toolkit）与CANN二进制算子包（cann-kernels），使用CANN软件版本为CANN 9.1.0。请参考《[CANN快速安装](https://www.hiascend.com/cann/download)》，选择`稳定版本`，并根据产品系列、CPU架构、操作系统等下载对应软件包（`Ascend-cann-toolkit_${version}_linux-${arch}.run`与`Ascend-cann-${chip_type}-ops_${version}_linux-${arch}.run`），最后参考页面提供的命令完成安装。
+2. **安装CANN软件包**：本样例的执行依赖CANN开发套件包（cann-toolkit）与CANN二进制算子包（cann-kernels），**推荐使用 CANN 9.2.0 及以上版本**，并安装与所选版本及硬件配套的 toolkit 和 ops 包。请参考《[CANN快速安装](https://www.hiascend.com/cann/download)》，选择`稳定版本`，并根据产品系列、CPU架构、操作系统等下载对应软件包（`Ascend-cann-toolkit_${version}_linux-${arch}.run`与`Ascend-cann-${chip_type}-ops_${version}_linux-${arch}.run`），最后参考页面提供的命令完成安装。
 
    > **说明**：`npu-smi info`输出可能无法直接体现910C芯片型号。910C所属产品系列为Atlas A3训练推理系列产品，对应的CANN Ops安装包SoC代号为`a3`，即`Ascend-cann-a3-ops_${version}_linux-${arch}.run`。
-3. 本样例依赖的**torch与torch_npu版本为2.12.0及以上**，请从[Ascend Extension for PyTorch插件](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download?versionId=186&ids=bcc87fc38cd74df28cf5c415cf2aea75%2C213%2C6%2C177%2C200%2C1%2C)下载并安装torch与torch_npu安装包，配套版本。
+3. **下载框架 wheel**：从[Ascend Extension for PyTorch 插件页](https://www.hiascend.com/developer/software/ai-frameworks/pytorch/download)选择 **TorchNPU 产品版 26.2.0** 下适配 **PyTorch 2.12.0、Python 3.12** 和目标 CPU 架构的安装包，准备 `torch 2.12.0+cpu` 与 `torch_npu 2.12.0.post3` 两个 wheel。进入下文的虚拟环境后再安装。
 
 ## ⬇️安装
 
+完整流程为“创建环境 → 安装配套框架 → 安装构建依赖 → 编译并安装 gauss-splat → 安装样例依赖 → 运行样例”。将 `/path/to/` 替换为框架 wheel 的实际下载目录，CANN 环境脚本也应使用实际安装路径。
+
 ```bash
-``编译安装
-conda create -n 3dgs python=3.12
+conda create -n 3dgs python=3.12 -y
 conda activate 3dgs
 
 git clone -b ${tag_version} https://gitcode.com/cann/gauss-splat.git
 cd gauss-splat
-source ${CANN_INSTALL_PATH}/ascend-toolkit/set_env.sh
+source /usr/local/Ascend/cann/set_env.sh  # 按实际安装路径调整
 
-pip install "numpy>=1.26.0,<2.0.0" decorator sympy scipy attrs cloudpickle psutil synr==0.5.0 tornado cmake pyyaml expecttest protobuf pytest
+python -m pip install -c constraints-cann92.txt /path/to/torch-2.12.0+cpu-*.whl /path/to/torch_npu-2.12.0.post3-*.whl
+python -m pip install -r requirements-build.txt
 
-方法1：
+# 确认框架版本和 NPU 可用性；有设备的运行环境应输出 True
+python -c "import torch, torch_npu; print(torch.__version__, torch_npu.__version__); print(torch.npu.is_available())"
+
+# Atlas A2/A3；A5 将此行替换为 bash build.sh --python=3.12 --a5
 bash build.sh --python=3.12
-参数`--python`指定编译使用的python版本，支持3.12及以上版本。编译成功后会在当前目录下生成`build`,  `dist`文件夹，生成的whl包在`dist`目录下。
-
-pip install dist/*.whl --force-reinstall
-
-方法2：
-pip install . --no-build-isolation
+python -m pip install --no-deps --force-reinstall dist/*.whl
 ```
 
-> **numpy/pycolmap 版本说明**: numpy 与 pycolmap 的版本选择与 Python 版本强关联。
-> - **numpy>=1.26.0,<2.0.0**: numpy 1.26.0 是首个支持 Python 3.12 的版本；上限锁定 <2.0.0 是为兼容 3DGS 生态及 rmbrualla 版 pycolmap（该库依赖 numpy 结构化 dtype 解析，未适配 numpy 2.x 中移除的旧 API）。
-> - **pycolmap**: 训练数据解析使用 `examples/requirements.txt` 中的 rmbrualla 分支 fork（纯 Python 实现，`from pycolmap import SceneManager`），Python 3.12 可直接源码安装，无 API 兼容问题；请保持 numpy<2.0.0 配套使用。
-> - 详细版本依赖关系请参考官网确认。
+如果 pip 提示 `Defaulting to user installation`，先用 `python -m pip --version` 确认正在使用已激活且可写的虚拟环境，再继续安装；用户目录与虚拟环境混装可能导致加载另一套 torch/torchvision。
+
+`--python` 应与激活环境一致。也可用 `python -m pip install . --no-build-isolation` 替代最后两步进行默认架构安装。训练/评估额外需要的依赖见下方《测试》或[训练样例](examples/README.md)。
+
+<details>
+<summary>编译时找不到 C++ 标准库头文件</summary>
+
+若编译提示 `cstdint`、`cfloat` 或 `type_traits file not found`，请先确认已安装与编译器匹配的 C++ 开发头文件，再启用本项目提供的兼容开关（默认关闭）：
+
+```bash
+export ASCENDC_ENABLE_HOST_HEADERS=ON
+bash build.sh --python=3.12
+```
+
+</details>
+
+> **数据解析依赖**：训练样例使用 `pycolmap>=3.12.6,<5` 和 `numpy>=1.26.0`。若没有适配当前 Python 版本和 CPU 架构的 pycolmap wheel，请参考[官方源码安装说明](https://github.com/colmap/colmap/tree/main/python)。
 
 Atlas A5 请在配套的 A5 CANN 环境中使用 `bash build.sh --python=3.12 --a5` 编译，并参考 [训练样例](examples/README.md)。
 
@@ -81,10 +96,13 @@ python quick_start.py
 
 ### 完整渲染流程（使用Rasterizer）
 
-> 提示：推荐先将高斯参数组织为 channel-first（如下例中的 `is_channel_first=True`），可避免算子内部的布局转换，性能更好。
+示例使用 `rasterization(...)`，相机输入为相机到世界的变换。高斯属性采用连续的 float32 NPU 张量：`means/scales [3,N]`、`quats [4,N]`、`opacities [N]`，3 阶球谐使用单个 `sh [16,3,N]`。
+
+此布局需设置 `splats["is_channel_first"] = True`（如下例），可避免内部布局转换；省略该标记时，接口默认按点优先布局读取：属性为 `[N,D]`，球谐系数为 `[N,K,3]`。
 
 ```python
 import torch
+import torch_npu
 import gauss_splat
 
 # 1. 初始化光栅化器
@@ -218,15 +236,23 @@ gauss-splat/
 
 ## 🧪测试
 
-测试前请先参考上文《安装》完成编译安装，并加载 CANN 环境（`source ${CANN_INSTALL_PATH}/ascend-toolkit/set_env.sh`）。
-
-如需运行 `examples/` 下的训练/数据样例（或引用其中代码的用例），请先安装样例依赖：
+先完成上文的框架和本库安装，并加载当前 CANN 的 `set_env.sh`。运行训练/数据样例时，在仓库根目录执行以下两条安装命令：
 
 ```bash
-pip install -r examples/requirements.txt
+# CPU 源仅用于 torchvision，--no-deps 保留已经安装的 Ascend 框架
+python -m pip install --no-deps --index-url https://download.pytorch.org/whl/cpu -c constraints-cann92.txt torchvision
+python -m pip install -r examples/requirements.txt
+
+# 检查依赖关系及 torchvision 二进制算子是否能正常加载
+python -m pip check
+python -c "import torch, torch_npu, torchvision; from torchvision.ops import nms; print(torch.__version__, torch_npu.__version__, torchvision.__version__); print(nms(torch.tensor([[0., 0., 1., 1.]]), torch.tensor([1.]), 0.5))"
 ```
 
-`examples/requirements.txt` 已声明 `imageio[ffmpeg]`、`opencv-python-headless`（提供 `cv2`）、`tqdm` 等依赖；`examples/gsplat` 为随仓库提供的 gsplat 子集，从 `examples/` 目录运行即可，无需额外安装同名 pip 包。
+`examples/requirements.txt` 通过 `-r ../requirements-build.txt` 复用构建依赖及其版本约束，只额外声明样例所需的包。公共依赖只维护一次，pip 会复用已满足要求的安装。安装 requirements 不会编译 gauss-splat，仍需先完成上文的编译装包步骤。
+
+constraints 只约束 Python 包，不检查 CANN/驱动版本，也不验证 wheel 来源，因此框架仍需先按上文安装。CPU torchvision 与原来的普通 PyPI 构建不能混用；遇到 `operator torchvision::nms does not exist` 时，可为第一条命令增加 `--force-reinstall` 后重新自检。
+
+`examples/requirements.txt` 已包含数据解析、图像和评估依赖；`examples/gsplat` 随仓库提供，无需再安装同名 pip 包。请在已激活的可写虚拟环境中使用 `python -m pip`，使安装和运行使用同一个解释器。
 
 ### Python 测试
 

@@ -12,7 +12,7 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 from PIL import Image
-from pycolmap import SceneManager
+import pycolmap
 from tqdm import tqdm
 from typing_extensions import assert_never
 
@@ -81,10 +81,7 @@ class Parser:
             colmap_dir
         ), f"COLMAP directory {colmap_dir} does not exist."
 
-        manager = SceneManager(colmap_dir)
-        manager.load_cameras()
-        manager.load_images()
-        manager.load_points3D()
+        manager = pycolmap.Reconstruction(colmap_dir)
 
         # Extract extrinsic matrices in world-to-camera format.
         imdata = manager.images
@@ -98,9 +95,10 @@ class Parser:
         bottom = np.array([0, 0, 0, 1]).reshape(1, 4)
         for k in imdata:
             im = imdata[k]
-            rot = im.R()
-            trans = im.tvec.reshape(3, 1)
-            w2c = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
+            # Older official bindings expose a property; newer ones a method.
+            pose = im.cam_from_world
+            pose = pose() if callable(pose) else pose
+            w2c = np.concatenate([pose.matrix(), bottom], axis=0)
             w2c_mats.append(w2c)
 
             # support different camera intrinsics
@@ -109,31 +107,30 @@ class Parser:
 
             # camera intrinsics
             cam = manager.cameras[camera_id]
-            fx, fy, cx, cy = cam.fx, cam.fy, cam.cx, cam.cy
-            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-            K[:2, :] /= factor
-            Ks_dict[camera_id] = K
+            intrinsics = np.array(cam.calibration_matrix(), dtype=np.float64, copy=True)
+            intrinsics[:2, :] /= factor
+            Ks_dict[camera_id] = intrinsics
 
             # Get distortion parameters.
-            type_ = cam.camera_type
+            type_ = cam.model.name
             camtype = None
-            if type_ == 0 or type_ == "SIMPLE_PINHOLE":
+            if type_ == "SIMPLE_PINHOLE":
                 params = np.empty(0, dtype=np.float32)
                 camtype = "perspective"
-            elif type_ == 1 or type_ == "PINHOLE":
+            elif type_ == "PINHOLE":
                 params = np.empty(0, dtype=np.float32)
                 camtype = "perspective"
-            elif type_ == 2 or type_ == "SIMPLE_RADIAL":
-                params = np.array([cam.k1, 0.0, 0.0, 0.0], dtype=np.float32)
+            elif type_ == "SIMPLE_RADIAL":
+                params = np.array([cam.params[3], 0.0, 0.0, 0.0], dtype=np.float32)
                 camtype = "perspective"
-            elif type_ == 3 or type_ == "RADIAL":
-                params = np.array([cam.k1, cam.k2, 0.0, 0.0], dtype=np.float32)
+            elif type_ == "RADIAL":
+                params = np.array([cam.params[3], cam.params[4], 0.0, 0.0], dtype=np.float32)
                 camtype = "perspective"
-            elif type_ == 4 or type_ == "OPENCV":
-                params = np.array([cam.k1, cam.k2, cam.p1, cam.p2], dtype=np.float32)
+            elif type_ == "OPENCV":
+                params = np.array(cam.params[4:8], dtype=np.float32)
                 camtype = "perspective"
-            elif type_ == 5 or type_ == "OPENCV_FISHEYE":
-                params = np.array([cam.k1, cam.k2, cam.k3, cam.k4], dtype=np.float32)
+            elif type_ == "OPENCV_FISHEYE":
+                params = np.array(cam.params[4:8], dtype=np.float32)
                 camtype = "fisheye"
             assert (
                 camtype == "perspective" or camtype == "fisheye"
@@ -208,17 +205,22 @@ class Parser:
         image_paths = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
         # 3D points and {image_name -> [point_idx]}
-        points = manager.points3D.astype(np.float32)
-        points_err = manager.point3D_errors.astype(np.float32)
-        points_rgb = manager.point3D_colors.astype(np.uint8)
+        # Point IDs are sparse identifiers, not row indices in the training arrays.
+        # Fetch the bound map once, rather than accessing the property per point.
+        points3D = manager.points3D
+        point_ids = sorted(points3D)
+        points = np.array([points3D[k].xyz for k in point_ids],
+                          dtype=np.float32).reshape(-1, 3)
+        points_err = np.array([points3D[k].error for k in point_ids],
+                              dtype=np.float32)
+        points_rgb = np.array([points3D[k].color for k in point_ids],
+                              dtype=np.uint8).reshape(-1, 3)
         point_indices = dict()
-
-        image_id_to_name = {v: k for k, v in manager.name_to_image_id.items()}
-        for point_id, data in manager.point3D_id_to_images.items():
-            for image_id, _ in data:
-                image_name = image_id_to_name[image_id]
-                point_idx = manager.point3D_id_to_point3D_idx[point_id]
-                point_indices.setdefault(image_name, []).append(point_idx)
+        for point_idx, point_id in enumerate(point_ids):
+            for element in points3D[point_id].track.elements:
+                if element.image_id in imdata:
+                    image_name = imdata[element.image_id].name
+                    point_indices.setdefault(image_name, []).append(point_idx)
         point_indices = {
             k: np.array(v).astype(np.int32) for k, v in point_indices.items()
         }
@@ -271,16 +273,16 @@ class Parser:
 
         # load one image to check the size. In the case of tanksandtemples dataset, the
         # intrinsics stored in COLMAP corresponds to 2x upsampled images.
-        for camera_id, K in self.Ks_dict.items():
+        for camera_id, intrinsics in self.Ks_dict.items():
             image_index = self.camera_ids.index(camera_id)
             actual_image = imageio.imread(self.image_paths[image_index])[..., :3]
             actual_height, actual_width = actual_image.shape[:2]
             colmap_width, colmap_height = self.imsize_dict[camera_id]
             s_height = actual_height / colmap_height
             s_width = actual_width / colmap_width
-            K[0, :] *= s_width
-            K[1, :] *= s_height
-            self.Ks_dict[camera_id] = K
+            intrinsics[0, :] *= s_width
+            intrinsics[1, :] *= s_height
+            self.Ks_dict[camera_id] = intrinsics
             self.imsize_dict[camera_id] = (actual_width, actual_height)
 
         # undistortion
@@ -296,20 +298,20 @@ class Parser:
             assert (
                 camera_id in self.params_dict
             ), f"Missing params for camera {camera_id}"
-            K = self.Ks_dict[camera_id]
+            intrinsics = self.Ks_dict[camera_id]
             width, height = self.imsize_dict[camera_id]
 
             if camtype == "perspective":
                 K_undist, roi_undist = cv2.getOptimalNewCameraMatrix(
-                    K, params, (width, height), 0
+                    intrinsics, params, (width, height), 0
                 )
                 mapx, mapy = cv2.initUndistortRectifyMap(
-                    K, params, None, K_undist, (width, height), cv2.CV_32FC1
+                    intrinsics, params, None, K_undist, (width, height), cv2.CV_32FC1
                 )
                 mask = None
             elif camtype == "fisheye":
                 mapx, mapy = cv2.fisheye.initUndistortRectifyMap(
-                    K, params, np.eye(3), K, (width, height), cv2.CV_32FC1
+                    intrinsics, params, np.eye(3), intrinsics, (width, height), cv2.CV_32FC1
                 )
 
                 # Use mask to define ROI
@@ -321,7 +323,7 @@ class Parser:
                 y_min, y_max = y_indices.min(), y_indices.max() + 1
                 x_min, x_max = x_indices.min(), x_indices.max() + 1
                 mask = mask[y_min:y_max, x_min:x_max]
-                K_undist = K.copy()
+                K_undist = intrinsics.copy()
                 K_undist[0, 2] -= x_min
                 K_undist[1, 2] -= y_min
                 roi_undist = [x_min, y_min, x_max - x_min, y_max - y_min]

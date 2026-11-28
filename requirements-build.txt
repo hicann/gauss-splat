@@ -1,0 +1,23 @@
+# Install the matching Ascend torch/torch_npu wheels first; see README.md.
+# Shared build dependencies, also included by examples/requirements.txt.
+-c constraints-cann92.txt
+
+torch
+torch-npu
+setuptools
+wheel
+typing-extensions>=4.10.0
+numpy
+decorator
+sympy
+scipy
+attrs
+cloudpickle
+psutil
+synr==0.5.0
+tornado
+cmake>=3.19
+pyyaml
+expecttest
+protobuf
+pytest

@@ -8,7 +8,10 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 import ast
+import json
+import os
 import struct
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -19,6 +22,13 @@ import cv2
 import numpy as np
 import pytest
 from PIL import Image
+
+try:
+    import pycolmap
+    PYCOLMAP_SKIP_REASON = ""
+except (ImportError, RuntimeError) as exc:
+    pycolmap = None
+    PYCOLMAP_SKIP_REASON = f"Official pycolmap backend unavailable: {exc.__cause__ or exc}"
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,15 +62,18 @@ def load_dataset(image):
     return namespace["Dataset"]
 
 
-def load_parser(manager):
+def load_parser(manager, real_paths=False):
     path = ROOT / "examples" / "datasets" / "colmap.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     parser_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Parser")
     path_stub = types.SimpleNamespace(join=lambda *parts: "/".join(parts), exists=lambda _: True)
     namespace = {
         "np": np,
-        "os": types.SimpleNamespace(path=path_stub),
-        "SceneManager": lambda _: manager,
+        "os": os if real_paths else types.SimpleNamespace(path=path_stub),
+        "json": json,
+        "pycolmap": types.SimpleNamespace(Reconstruction=lambda _: manager),
+        "_get_rel_paths": lambda _: ["a.png", "b.png"],
+        "imageio": types.SimpleNamespace(imread=lambda _: np.zeros((6, 8, 3), dtype=np.uint8)),
     }
     exec(compile(ast.Module(body=[parser_node], type_ignores=[]), str(path), "exec"), namespace)
     return namespace["Parser"]
@@ -76,20 +89,96 @@ def parser_stub(mask):
 
 
 class ColmapDatasetTest(unittest.TestCase):
+    @unittest.skipIf(pycolmap is None, PYCOLMAP_SKIP_REASON)
+    def test_official_pycolmap_text_and_binary_models(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        tmp = temp_dir.name
+        scene = Path(tmp)
+        sparse = scene / "sparse/0"
+        sparse.mkdir(parents=True)
+        (scene / "images").mkdir()
+        (sparse / "cameras.txt").write_text("7 PINHOLE 8 6 4 5 4 3\n")
+        (sparse / "images.txt").write_text(
+            "9 1 0 0 0 2 0 0 7 b.png\n0 0 100 0 0 2\n"
+            "3 1 0 0 0 1 0 0 7 a.png\n0 0 2\n")
+        (sparse / "points3D.txt").write_text(
+            "100 1 0 2 10 20 30 0.25 9 0\n"
+            "2 2 0 2 10 20 30 0.25 3 0 9 1\n")
+        reconstruction = pycolmap.Reconstruction(str(sparse))
+        for binary in (False, True):
+            with self.subTest(binary=binary):
+                if binary:
+                    reconstruction.write_binary(str(sparse))
+                model = pycolmap.Reconstruction(str(sparse))
+                parsed = load_parser(model, real_paths=True)(tmp)
+                self.assertEqual(parsed.image_names, ["a.png", "b.png"])
+                np.testing.assert_array_equal(parsed.camtoworlds[:, 0, 3], [-1, -2])
+                np.testing.assert_array_equal(parsed.points[:, 0], [2, 1])
+                np.testing.assert_array_equal(parsed.point_indices["a.png"], [0])
+                np.testing.assert_array_equal(parsed.point_indices["b.png"], [0, 1])
+                np.testing.assert_array_equal(parsed.Ks_dict[7],
+                                              [[4, 0, 4], [0, 5, 3], [0, 0, 1]])
+
     def test_unknown_camera_after_supported_camera_raises(self):
         image = lambda camera_id: types.SimpleNamespace(
-            R=lambda: np.eye(3), tvec=np.zeros(3), camera_id=camera_id,
+            cam_from_world=lambda: types.SimpleNamespace(matrix=lambda: np.eye(4)[:3]),
+            camera_id=camera_id,
         )
         camera = lambda model: types.SimpleNamespace(
-            camera_type=model, fx=1., fy=1., cx=1., cy=1., width=3, height=3,
+            model=types.SimpleNamespace(name=model), calibration_matrix=lambda: np.eye(3),
+            width=3, height=3,
         )
         manager = types.SimpleNamespace(
-            load_cameras=lambda: None, load_images=lambda: None, load_points3D=lambda: None,
-            images={0: image(0), 1: image(1)}, cameras={0: camera(0), 1: camera(999)},
+            images={0: image(0), 1: image(1)}, cameras={0: camera("PINHOLE"), 1: camera("UNKNOWN")},
         )
         parser = load_parser(manager)
         with self.subTest(), self.assertRaisesRegex(AssertionError, "Only perspective and fisheye"):
             parser("scene")
+
+    def test_reconstruction_preserves_poses_and_sparse_track_indices(self):
+        for method_pose in (False, True):
+            with self.subTest(method_pose=method_pose), tempfile.TemporaryDirectory() as tmp:
+                scene = Path(tmp)
+                (scene / "sparse/0").mkdir(parents=True)
+                (scene / "images").mkdir()
+
+                def image(name, tx, method_pose=method_pose):
+                    matrix = np.eye(4)[:3].copy()
+                    matrix[0, 3] = tx
+                    pose = types.SimpleNamespace(matrix=lambda: matrix)
+                    return types.SimpleNamespace(name=name, camera_id=7,
+                        cam_from_world=(lambda: pose) if method_pose else pose)
+
+                def point(x, image_ids):
+                    return types.SimpleNamespace(xyz=[x, 0, 2], error=0.25,
+                        color=[10, 20, 30], track=types.SimpleNamespace(elements=[
+                            types.SimpleNamespace(image_id=i) for i in image_ids]))
+
+                class ReconstructionStub(types.SimpleNamespace):
+                    points3D_reads = 0
+
+                    @property
+                    def points3D(self):
+                        self.points3D_reads += 1
+                        return self.point_data
+
+                manager = ReconstructionStub(
+                    images={9: image("b.png", 2), 3: image("a.png", 1)},
+                    cameras={7: types.SimpleNamespace(model=types.SimpleNamespace(name="PINHOLE"),
+                        calibration_matrix=lambda: np.array([[4., 0, 4], [0, 5, 3], [0, 0, 1]]),
+                        width=8, height=6)},
+                    point_data={100: point(1, [9]), 2: point(2, [3, 9])})
+                parsed = load_parser(manager, real_paths=True)(tmp)
+                self.assertEqual(manager.points3D_reads, 1)
+                self.assertEqual(parsed.image_names, ["a.png", "b.png"])
+                np.testing.assert_array_equal(parsed.camtoworlds[:, 0, 3], [-1, -2])
+                np.testing.assert_array_equal(parsed.points[:, 0], [2, 1])
+                np.testing.assert_array_equal(parsed.point_indices["a.png"], [0])
+                np.testing.assert_array_equal(parsed.point_indices["b.png"], [0, 1])
+                np.testing.assert_array_equal(parsed.Ks_dict[7], [[4, 0, 4], [0, 5, 3], [0, 0, 1]])
+                self.assertEqual(parsed.points.dtype, np.float32)
+                self.assertEqual(parsed.points_rgb.dtype, np.uint8)
 
     def test_crop_keeps_mask_and_reaches_lower_right(self):
         image = np.arange(27, dtype=np.uint8).reshape(3, 3, 3)

@@ -36,7 +36,9 @@ if(BUILD_ARCH35)
     set(ASCEND_AUTOGEN_PATH ${CMAKE_BINARY_DIR}/autogen_arch35)
     set(vendor_name customize_arch35)
 endif()
-file(MAKE_DIRECTORY ${ASCEND_AUTOGEN_PATH})
+file(MAKE_DIRECTORY "${ASCEND_AUTOGEN_PATH}")
+# Reset the options file for the selected architecture on every configure.
+file(WRITE "${ASCEND_AUTOGEN_PATH}/${CUSTOM_COMPILE_OPTIONS}" "")
 
 set(ASCEND_OPS_TARGET "")
 foreach(op_name ${ASCEND_OPS})
@@ -174,8 +176,14 @@ elseif(BUILD_STAGE EQUAL 1)
   install_target(TRG cust_opapi DST packages/vendors/${vendor_name}/op_api/lib)
   install_file(TRG cust_opapi SRC ${ACLNN_INC} DST
                packages/vendors/${vendor_name}/op_api/include)
+  include("${PROJECT_SOURCE_DIR}/cmake/ascendc_system_headers.cmake")
+  ascendc_system_header_options(ascendc_options)
   if("${CMAKE_BUILD_TYPE}x" STREQUAL "Debugx")
-    add_ops_compile_options(ALL OPTIONS -g -O0)
+    list(APPEND ascendc_options -g -O0)
+  endif()
+  # The parser replaces ALL entries, so emit headers and debug flags together.
+  if(ascendc_options)
+    add_ops_compile_options(ALL OPTIONS ${ascendc_options})
   endif()
 
   # Binary compilation expects all selected kernel sources in one directory.
